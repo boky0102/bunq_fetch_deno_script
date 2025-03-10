@@ -1,0 +1,10 @@
+{
+    "tasks": {
+        "dev": "deno run --watch --allow-read --allow-net --env-file=.env --allow-ffi --allow-env main.ts"
+    },
+    "imports": {
+        "@std/assert": "jsr:@std/assert@1",
+        "node:os": "node:os",
+        "node:crypto": "node:crypto"
+    }
+}
