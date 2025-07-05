@@ -7,7 +7,6 @@ import { UserPerson } from "./types.d.ts";
 import { MonetaryAccountData, MonetaryAccountBank } from "./types.d.ts";
 import { addEntry, createDb, executeSql } from "./db.ts";
 
-// token from instalation needs to go to the AUTHORIZATION HEADER !!!
 // IN ORDER FOR SCRIPT TO WORK YOU NEED TO MAKE RSA KEY PAIRS
 
 const bunqUrl = "https://api.bunq.com/v1/";
