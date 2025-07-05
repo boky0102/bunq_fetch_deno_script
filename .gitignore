@@ -96,4 +96,8 @@ typings/
 
 _dist
 
-.db
+*.db
+
+*.pub
+
+*.key

@@ -1,5 +1,10 @@
 // Type imports
-import { BunqInstallResponse, Payment, PaymentEntry, SessionData } from "./types.d.ts";
+import {
+    BunqInstallResponse,
+    Payment,
+    PaymentEntry,
+    SessionData,
+} from "./types.d.ts";
 ////////////////////////////////////////////////////
 import * as crypto from "node:crypto";
 import { Buffer } from "node:buffer";
@@ -8,11 +13,13 @@ import { MonetaryAccountData, MonetaryAccountBank } from "./types.d.ts";
 import { addEntry, createDb, executeSql } from "./db.ts";
 
 // IN ORDER FOR SCRIPT TO WORK YOU NEED TO MAKE RSA KEY PAIRS
+// ADD API KEY AND IP ADDRESS TO THE ENV
+// HAVE DENO INSTALLED
 
 const bunqUrl = "https://api.bunq.com/v1/";
 
 async function readPublicKey(): Promise<string> {
-    const publicKey = await Deno.readTextFile("./public_key.pem");
+    const publicKey = await Deno.readTextFile("./installation.pub");
     const pbKeyString = publicKey.toString();
     return pbKeyString;
 }
@@ -48,25 +55,31 @@ async function getTokens(publicKey: string): Promise<BunqInstallResponse> {
         throw new Error("Cant get installation running");
     }
 
-    console.log("GOT INSTALLATION TOKEN SUCCESFULLY");
+    console.log("___INSTALATION COMPLETE___");
 
     return responseData;
 }
 
-async function generateDeviceBody() {
-    console.log(Deno.env.get("API_KEY"));
+async function generateDeviceBody(apiKey: string) {
+    const ipAddress = Deno.env.get("IP_ADDRESS");
+
+    if(ipAddress == undefined){
+        console.error("ERROR: IP ADDRESS NOT DEFINED IN ENV VARIABLES");
+    }
     const data = {
         description: "bla",
-        secret: Deno.env.get("API_KEY"),
-        permitted_ips: ["84.28.52.234"],
+        secret: apiKey,
+        permitted_ips: [ipAddress],
     };
+
+    console.log(`Added IP address ${ipAddress} to the device body`);
 
     const stringData = JSON.stringify(data);
     return stringData;
 }
 
 async function readPrivateKey() {
-    const privateKey = await Deno.readTextFile("./private_key.pem");
+    const privateKey = await Deno.readTextFile("./installation.key");
     const privateKeyString = privateKey.toString();
     return privateKeyString;
 }
@@ -79,20 +92,29 @@ async function signRequestBody(requestBody: string, privateKey: string) {
 }
 
 // FAILING
-async function verifySignature(data: string, signature: string, publicKey: string) {
+async function verifySignature(
+    data: string,
+    signature: string,
+    publicKey: string,
+) {
     const isVerified = crypto.verify(
         "sha256",
         Buffer.from(data),
         {
             key: publicKey,
         },
-        Buffer.from(signature)
+        Buffer.from(signature),
     );
 
     return isVerified;
 }
 
-async function postDevice(signature: string, postBody: string, apiKey: string, authToken: string) {
+async function postDevice(
+    signature: string,
+    postBody: string,
+    apiKey: string,
+    authToken: string,
+) {
     const request = new Request(bunqUrl + "device-server", {
         method: "POST",
         body: postBody,
@@ -106,14 +128,13 @@ async function postDevice(signature: string, postBody: string, apiKey: string, a
     const response = await fetch(request);
     if (response.status !== 200) {
         console.log("****** FAILED TO POST DEVICE *******");
+        console.log(response);
     } else {
-        console.log("DEVICE POSETED SUCESSFULLY");
+        console.log("___DEVICE POSTED SUCESSFULLY___");
     }
 }
 
-async function postSession(authToken: string): Promise<[UserPerson, string]> {
-    const apiKey = Deno.env.get("API_KEY") as string;
-
+async function postSession(authToken: string, apiKey: string): Promise<[UserPerson, string]> {
     const data = {
         secret: apiKey,
     };
@@ -130,10 +151,10 @@ async function postSession(authToken: string): Promise<[UserPerson, string]> {
         headers: {
             "X-Bunq-Client-Signature": signatureString,
             "X-Bunq-Client-Authentication": authToken,
-        },
+       },
     });
 
-    const response = await fetch(request);
+   const response = await fetch(request);
 
     const responseData = (await response.json()) as SessionData;
     const [id, token, userData] = responseData.Response;
@@ -152,7 +173,7 @@ async function createRequest(url: string, token: string): Promise<Request> {
 
 async function getMonetaryAccounts(
     token: string,
-    user: UserPerson
+    user: UserPerson,
 ): Promise<MonetaryAccountBank[]> {
     const url = bunqUrl + `/user/${user.id}/monetary-account`;
     const request = await createRequest(url, token);
@@ -170,7 +191,9 @@ async function getMonetaryAccounts(
 async function getPayments(token: string, userId: number, accountId: number) {
     let dataAvaliable = true;
     let iteration = 0;
-    let url = bunqUrl + `user/${userId}/monetary-account/${accountId}/payment?count=200`;
+    let url =
+        bunqUrl +
+        `user/${userId}/monetary-account/${accountId}/payment?count=200`;
 
     while (dataAvaliable) {
         const request = await createRequest(url, token);
@@ -181,7 +204,9 @@ async function getPayments(token: string, userId: number, accountId: number) {
         console.log(response.status);
         console.log(responseData);
 
-        for await (const payment of responseData.Response as [{ Payment: Payment }]) {
+        for await (const payment of responseData.Response as [
+            { Payment: Payment },
+        ]) {
             try {
                 const pym = payment.Payment as Payment;
                 const created = new Date(pym.created);
@@ -199,7 +224,8 @@ async function getPayments(token: string, userId: number, accountId: number) {
                     type: pym.type,
                     iban: pym.counterparty_alias.iban,
                     name: pym.counterparty_alias.display_name,
-                    category_code: pym.counterparty_alias.merchant_category_code,
+                    category_code:
+                        pym.counterparty_alias.merchant_category_code,
                     subtype: pym.subtype,
                     balance_after: parseFloat(pym.balance_after_mutation.value),
                 };
@@ -235,15 +261,35 @@ async function getPayments(token: string, userId: number, accountId: number) {
 }
 
 try {
+    console.log("Trying to fetch payment data");
+    const apiKey = Deno.env.get("BUNQ_KEY") as string;
+    if (apiKey == undefined) {
+        console.log(apiKey);
+        console.error("ERROR: API KEY UNDEFINED");
+        process.exit(1);
+    }
+
     const publicKey = await readPublicKey();
+    console.log("Public key successfully read");
+
     const privateKey = await readPrivateKey();
+    console.log("Private key successfully read");
+
     const installData = await getTokens(publicKey);
-    const deviceBody = await generateDeviceBody();
+    const deviceBody = await generateDeviceBody(apiKey);
     const signature = await signRequestBody(deviceBody, privateKey);
     const signatureString = signature.toString("base64");
-    const apiKey = Deno.env.get("API_KEY") as string;
-    await postDevice(signatureString, deviceBody, apiKey, installData.Response[1].Token.token);
-    const [userData, token] = await postSession(installData.Response[1].Token.token);
+
+    await postDevice(
+        signatureString,
+        deviceBody,
+        apiKey,
+        installData.Response[1].Token.token,
+    );
+    const [userData, token] = await postSession(
+        installData.Response[1].Token.token,
+        apiKey
+    );
     const bankAccounts = await getMonetaryAccounts(token, userData);
     // TO OD  -- FIND MAIN BANK ACCOUNT ON REAL API
     const mainAccount = bankAccounts[2];
